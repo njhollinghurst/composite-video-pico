@@ -1,0 +1,41 @@
+;;;Copyright (c) 2026 Raspberry Pi Ltd.
+;;;
+;;; SPDX-License-Identifier: BSD-3-Clause
+
+.pio_version 0
+
+;; Timer SM. Raise IRQ1 for every scanline start. Initialize by putting the period in cycles, minus 3.
+.program timer
+	out y, 32
+.wrap_target
+	irq set 1
+	mov x, y
+timer_loop:
+	jmp x--, timer_loop
+.wrap
+
+;; Output SM (11 cycles per sample). Initialize by putting the line length (in bytes) minus one.
+.program scanlines_4bpp_div11
+	out y, 32
+.wrap_target
+	set pins, 4  ;; blanking level
+	mov x, y
+	wait irq, 1
+out_loop:
+	out pins, 4 [10]
+	out pins, 4 [9]
+	jmp x--, out_loop
+.wrap
+
+;; Output SM (8.5 cycles per sample). Initialize by putting the line length (in bytes) minus one.
+.program scanlines_4bpp_div8p5
+	out y, 32
+.wrap_target
+	set pins, 4  ;; blanking level
+	mov x, y
+	wait irq, 1
+out_loop:
+	out pins, 4 [7]
+	out pins, 4 [7]
+	jmp x--, out_loop
+.wrap
