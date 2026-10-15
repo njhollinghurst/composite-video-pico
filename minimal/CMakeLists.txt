@@ -14,7 +14,7 @@ if (0)
     )
 endif()
 
-target_sources(minimal PRIVATE minimal.c)
+target_sources(minimal PRIVATE minimal.c raspberry_rle_data.h)
 
 # pull in common dependencies
 target_link_libraries(minimal pico_stdlib hardware_pio hardware_dma)

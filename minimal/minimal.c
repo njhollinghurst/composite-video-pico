@@ -18,6 +18,7 @@
 #include "hardware/vreg.h"
 
 #include "minimal.pio.h"
+#include "raspberry_rle_data.h"
 
 /***************************************************************************
  * Simplest example of composite video output from a Raspberry Pi Pico.
@@ -149,7 +150,7 @@ void init_buffer()
       /*
        * This is an approximation to the famous PAL "swinging burst", neglecting
        * the "precision offset", effectively rounding down f_c to 4433593.75 Hz
-       * so that burst phase (relative to H0) will invert in every 2nd of 4 rows.
+       * so that burst phase (relative to H0) will be in 4-row pattern (+,+,-,-).
        */
       static const uint8_t burst[2][24] = {
         { 0x44, 0x34, 0x66, 0x22, 0x66, 0x22, 0x66, 0x22, 0x66, 0x22, 0x66, 0x22,
@@ -327,7 +328,7 @@ void draw_colour_bars()
   for(int i = 0; i < ACTIVE_HEIGHT; i++) {
     uint16_t *ptr = (uint16_t *)get_line(i);
     int x = 0;
-    uint16_t val = 0;
+    uint16_t val = 0xeeee;
     for(int b = 0; b < 8; b++) {
       uint16_t pattern[4];
       if (b < 7)
@@ -337,13 +338,46 @@ void draw_colour_bars()
 
       // smooth the boundaries to reduce colour artifacts (ugh)
       *ptr++ =
-        (3 * (val & 0xf) + (pattern[i & 3] & 0xf) >> 2) +
-        (((val & 0xf0) + 3 * (pattern[i & 3] & 0xf0) >> 2) & 0x00f0) +
+        ((3 * (val & 0xf) + (pattern[i & 3] & 0xf)) >> 2) +
+        ((((val & 0xf0) + 3 * (pattern[i & 3] & 0xf0)) >> 2) & 0x00f0) +
         (pattern[i & 3] & 0xff00);
       val = pattern[i & 3];
       for(x++; x < ACTIVE_WIDTH * (b + 1) / 32; x++) {
         *ptr++ = val;
       }
+    }
+  }
+}
+
+void draw_raspberry()
+{
+  const unsigned char *ptr = raspberry_rle_data;
+  uint16_t palette[3][4];
+
+  mk_colour(0, 0, 0, palette[0]);
+  mk_colour(255, 0, 64, palette[1]);
+  mk_colour(0, 200, 0, palette[2]);
+
+  for(int i = 0; i < RASPBERRY_HEIGHT; i++) {
+    int c, x0 = 0, x1 = 0;
+    unsigned char *scanline =
+      get_line((ACTIVE_HEIGHT - RASPBERRY_HEIGHT) / 2 + i) +
+      (ACTIVE_WIDTH - RASPBERRY_WIDTH) / 4;
+    while (x0 < RASPBERRY_WIDTH) {
+      c = *ptr++;
+      x1 = x0 + (c & 0x3f);
+      if (x1 == x0) x1 = RASPBERRY_WIDTH;
+      c >>= 6;
+      if (c < 3) {
+	if (x0 & 1) {
+	  scanline[x0>>1] = (scanline[x0>>1] & 0xf) | ((palette[c][i & 3] >> (4 * (x0 & 3))) << 4);
+	  x0++;
+	}
+	for (;x0 < x1; x0 += 2) {
+	  scanline[x0>>1] = palette[c][i & 3] >> (4 * (x0 & 2));
+	}
+      }
+      x0 = x1;
     }
   }
 }
@@ -488,6 +522,7 @@ void main()
   // initialize frame buffer
   init_buffer();
   draw_colour_bars();
+  draw_raspberry();
 
   // start output
   setup_pio_and_dma();
