@@ -19,4 +19,4 @@ This simplicity comes at a cost: Only progressive modes (up to 752x240p, 912x288
 
 Colours have to be encoded by software, so the sample-rate was chosen to simplify this (14.318 MHz or 17.735 MHz). This in turn requires a specific core clock rate: 157.5 MHz for NTSC or 150.75 MHz for PAL. (Higher rates may be possible, if you want to overclock, but I haven't tried any.)
 
-NTSC is encoded pretty much by-the-book. For PAL, a bodge was needed: I've reduced the effective colour carrier frequency from 4433618.75 Hz to 4433593.75 Hz, a discrepancy of -5.6 ppm (on top of the Pico crystal's tolerance). This is essential to ensure that a single 312-line field can be repeated exactly.
+NTSC is encoded pretty much by-the-book. For PAL, a bodge was needed: I've reduced the effective colour carrier frequency from 4433618.75 Hz to 4433593.75 Hz, a discrepancy of -5.6 ppm (on top of the Pico crystal's &pm; 30 ppm tolerance). This is essential to ensure that a single 312-line field can be repeated exactly.
