@@ -1,7 +1,7 @@
 # composite-video-pico
 Experiments to generate colour composite video output (NTSC/PAL) from Raspberry Pi Pico.
 
-I've targeted simplicity over high quality or standards compliance, and with little regard for EMC. Some colour and pattern artifacts are to be expected, due to the lack of proper fitlering, and liberties taken with timings.
+I've targeted simplicity over high quality or standards compliance, and with little regard for EMC. Some colour and pattern artifacts are to be expected, due to the lack of proper filtering, and liberties taken with timings.
 
 This is a work in progress, largely undocumented and entirely without warranty. It may be broken from time to time or squashed/rebased without warning.
 
