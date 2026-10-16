@@ -1,0 +1,123 @@
+;;;Copyright (c) 2026 Raspberry Pi Ltd.
+;;;
+;;; SPDX-License-Identifier: BSD-3-Clause
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; PIO programs to generate NTSC-M video, assuming a core clock of 157.5 MHz.
+;; We need one whole PIO and use three SMs (timer, sync/burst, active video)
+;; and two DMA channels (for sync/burst codes, and 4- or 8-bit raw video).
+;; Sync program must be at address 0. All programs use autopull (32-bit, LE).
+;; Video may be output on GPIOs 15:12 or 15:8. Sync drives GPIOs 15:12 only.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.pio_version 0
+
+.define BURST_CYCLES  9
+.define TC           44
+.define HTC     (TC>>1)
+.define Q1     (HTC>>1)
+.define Q2     (HTC-Q1)
+.define T_SYNC      740
+.define T_BURST     836
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Timer program. Raise IRQ 0 once every half-scanline.
+;; Initialize by pushing the value (half_scanline_cycles - 3).
+;; At 157.5 MHz, the value should be 5002 (or 5013 for "artifact colour")
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.program timer
+	out y, 32
+.wrap_target
+	mov x, y
+loop:
+	jmp x--, loop
+	irq set 0
+.wrap
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Sync-and-burst generating program. This program uses a computed jump
+;; and must be loaded at address 0 and started from the symbol Start.
+;; It reads a series of 32-bit codes with the following fields (in LE order)
+;; each generating one sync pulse with optional colour-burst and optionally
+;; raising IRQ 1 for active video.
+;;
+;; 12 bits: Sync pulse width 2*(n+1) cycles (standard value 369 => 4.698us)
+;;  3 bits: Burst first-half value    } starting at T_BURST, repeated
+;;  3 bits: Burst second-half value   }  9 times for HTC cycles each
+;;  3 bits: Pre-burst transition value, starts Q2 cycles before T_BURST
+;;  3 bits: Post-burst transition value, overlaps with the following delay
+;;  6 bits: Burst-to-active delay 22*(n+2) cycles, or 0 if not active line
+;;  2 bits: 0 => active line; 2 => inactive full line; 3 => half line
+;;
+;; Burst and active video may only occur when sync width was standard (369).
+;; For no colour burst, set all four burst values to 4 (== blanking level).
+;; Otherwise, depending on burst polarity, values are 6,2,3,5 or 2,6,5,3.
+;; Colour burst starts 5.308us (19 colour cycles) after horizontal datum.
+;; The standard burst-to-active delay is 10 => 1.676us, for a 752-sample
+;; active region starting 9.498us (34 colour cycles) after horizontal datum.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.program ntsc_sync
+.origin 0
+           jmp x--, 0    [HTC-1]
+/* 1495 */ irq set 1     ;; one cycle before active
+PUBLIC Start:
+           wait irq, 0   ;; Full-line entry point at program address 2
+           out x, 12     ;; Half-line entry point at program address 3
+           wait irq, 0
+sync_loop: /* T=0 */
+           set pins, 0
+           jmp x--, sync_loop
+/*  740 */ set pins, 4   [31] ;; <- time shown assumes x was 369
+/*  772 */ out y, 3      [31]
+/*  804 */ out isr, 3    [T_BURST-Q2-T_SYNC-66]
+/*  824 */ set x, (BURST_CYCLES-1)
+/*  825 */ out pins, 3   [Q2-1]
+burst_loop: /* 826 */
+           mov pins, y   [HTC-1]
+           mov pins, isr [HTC-2]
+           jmp x--, burst_loop
+/* 1232 */ out pins, 3   [Q2-1]
+/* 1243 */ set pins, 4   [Q1-4]
+/* 1251 */ out x, 6
+/* 1252 */ out pc, 2
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Clock out a line of pixels at 4bpp (LE), at 14.318182 MHz (4 * fc).
+;; Initialize by pushing the value (line_length_in_samples/2 - 1)
+;; For 32-bit DMA, line_length_in_samples should be a multiple of 8.
+;; All samples (nybbles) should normally be in the range 0x3 .. 0xF.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.program ntsc_4bpp
+	out y, 32
+.wrap_target
+	set pins, 4
+	mov x, y
+	wait irq, 1
+out4_loop:
+	out pins, 4 [Q1-1]
+	out pins, 4 [Q2-2]
+	jmp x--, out4_loop
+.wrap
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Clock out a line of pixels at 8bpp (LE), at 14.318182 MHz (4 * fc).
+;; Initialize by pushing the value 0x40000000 |(line_length_in_samples/2 - 1)
+;; For 32-bit DMA, line_length_in_samples should be a multiple of 4.
+;; All samples (bytes) should normally be in the range 0x30 .. 0xFF.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.program ntsc_8bpp
+	out isr, 8
+	out y, 24
+.wrap_target
+	mov pins, isr
+	mov x, y
+	wait irq, 1
+out8_loop:
+	out pins, 8 [Q1-1]
+	out pins, 8 [Q2-2]
+	jmp x--, out8_loop
+.wrap
