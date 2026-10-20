@@ -14,3 +14,4 @@ pico_sdk_init()
 # rest of your project
 add_subdirectory(minimal)
 add_subdirectory(sync_burst_pio)
+add_subdirectory(rough_interlace)

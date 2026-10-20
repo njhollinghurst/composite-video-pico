@@ -39,3 +39,19 @@ Output quality is much the same as before, including the same colour and texture
 ![Colour cube demo](doc/ccube_viz.png)
 
 This time I added an animated demo, which visualises the use of a 6x6x6 "colour cube" palette. (It runs single-buffered, but is timed to avoid tearing.)
+
+## Experiment 3: Rough interlace
+
+First attempt at interlaced video! The sync-and-burst pattern is modified (to generate 4 fields for NTSC, 8 fields for PAL), while retaining a single-field buffer for the video.
+
+Since fields alternate between upper and lower *and* the colour-encoding phase changes on a 4- or 8-field cycle, it is necessary for S/W to re-write the buffer for every field. The cube demo was hastily modified to render either an upper or a lower field. The cube now stop rotating periodically, so the full-resolution image can be examined more closely.
+
+Although artifacts are significantly reduced compared to progressive, interlaced PAL still suffers from an unpleasant "dot-crawl" effect. That is because I'm still omitting the 25Hz precision offset.
+
+### Things maybe to do:
+
+ - Implement proper circular buffering à la scanvideo (maybe in broad strips for easier 3D rendering)
+ - Fix up the half-lines (currently they are output as full lines, and in the PAL case impinge on vertical blanking)
+ - Investigate if I can restore the PAL 25Hz precision offset, preferably without breaking palette lookups
+ - Investigate efficient ways to use different horizontal sample rates, which some emulators might want
+ - Investigate efficient ways to filter the chroma components to reduce artifacts
