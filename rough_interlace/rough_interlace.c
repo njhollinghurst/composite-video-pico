@@ -60,6 +60,7 @@
  ***************************************************************************/
 
 #if PAL
+#define PAL_PRECISION_HACK // slant horizontal timings to emulate the 25Hz precision offset
 #define CORE_FREQ_KHZ             150750 // 150.75 MHz
 #define CYCLES_PER_ROW              9648 // 15625 Hz
 #define CYCLES_PER_SAMPLE            8.5 // 17.735294 MHz ~= 4*f_c
@@ -68,9 +69,9 @@
 #define NUM_HALFLINES                  7
 #define TOTAL_ROWS                   312
 #define SAMPLES_PER_ROW             1104
-#define SYNC_PULSE_WIDTH          ((int)(CORE_FREQ_KHZ*500.0*4.7e-6)-1)
-#define EQ_PULSE_WIDTH            ((int)(CORE_FREQ_KHZ*500.0*2.35e-6)-1)
-#define BROAD_PULSE_WIDTH         ((int)(CORE_FREQ_KHZ*500.0*27.3e-6)-1)
+#define SYNC_PULSE_WIDTH          ((int)(CORE_FREQ_KHZ*1000.0*4.7e-6)-32)
+#define EQ_PULSE_WIDTH            ((int)(CORE_FREQ_KHZ*1000.0*2.35e-6)-32)
+#define BROAD_PULSE_WIDTH         ((int)(CORE_FREQ_KHZ*1000.0*27.3e-6)-32)
 #define STANDARD_BURST_TO_ACTIVE      24
 #define MAX_ACTIVE_HEIGHT            288
 #define MAX_ACTIVE_WIDTH             912
@@ -118,6 +119,17 @@ static int init_syncburst(unsigned int active_width, unsigned int active_height)
   for(int fld = 0; fld < NUM_FIELDS; fld++) {
     for(int i = 0; i < TOTAL_ROWS + (fld & 1); i++) {
       uint32_t w;
+#ifdef PAL_PRECISION_HACK
+      // Bursts and video at the top of a field start 8 core-cycles late, and at the bottom 8 cycles early.
+      // On average this effectively increases the chroma carrier frequency by (whaddaya know) about 25 Hz.
+      // When bursts resume in the next field, we've gained half a cycle, ameliorating the 6.25 Hz dot crawl.
+      int offset, swap;
+      offset = 8 - (17 * ((i + TOTAL_ROWS - MAX_ACTIVE_HEIGHT - NUM_HALFLINES/2) % TOTAL_ROWS)) / TOTAL_ROWS;
+      swap = (fld + (i >= MAX_ACTIVE_HEIGHT + NUM_HALFLINES/2)) & 1;
+#else
+      static const int offset = 0;
+      static const int swap = 0;
+#endif
       if (i >= MAX_ACTIVE_HEIGHT && i < MAX_ACTIVE_HEIGHT + NUM_HALFLINES + (fld & 1)) {
 #if PAL
 	if (fld & 1) { // longer blanking region which follows upper field
@@ -186,8 +198,11 @@ static int init_syncburst(unsigned int active_width, unsigned int active_height)
 	  ++first_line_with_burst;
 	if (i >= first_line_with_burst - 9 && i < first_line_with_burst)
 	  w = CODE_BURST_NONE + SYNC_PULSE_WIDTH;
+	else if (swap)
+	  w = ((i + fld/2) & 2) ? CODE_BURST_POS + SYNC_PULSE_WIDTH : CODE_BURST_NEG + SYNC_PULSE_WIDTH;
 	else
 	  w = ((i + fld/2) & 2) ? CODE_BURST_NEG + SYNC_PULSE_WIDTH : CODE_BURST_POS + SYNC_PULSE_WIDTH;
+	w += offset;
 #else
 	w = ((i + fld/2) & 1) ? CODE_BURST_NEG + SYNC_PULSE_WIDTH : CODE_BURST_POS + SYNC_PULSE_WIDTH;
 #endif
@@ -402,7 +417,11 @@ void main()
     sprintf(str, "%s composite video from Raspberry Pi Pico via 4-bit \"DAC\" %dx%di %dHz", PAL ? "PAL" : "NTSC", ACTIVE_WIDTH, 2*ACTIVE_HEIGHT, PAL ? 50 : 60);
     sem_acquire_blocking(&sem);
     gpio_put(PICO_DEFAULT_LED_PIN, (frame_count++ & 16) ? 0 : 1);
+#ifdef PAL_PRECISION_HACK
+    ccube_demo_render(get_line(0), frame_count/2 + 2*frame_count, !(frame_count & 1));
+#else
     ccube_demo_render(get_line(0), frame_count/2, !(frame_count & 1));
+#endif
     draw_text((ACTIVE_WIDTH - 73*8) / 2, ACTIVE_HEIGHT - 40, str, !(frame_count & 1));
     if (!(frame_count & 128)) ccube_demo_update();
   }

@@ -42,7 +42,7 @@ loop:
 ;; each generating one sync pulse with optional colour-burst and optionally
 ;; raising IRQ 1 for active video.
 ;;
-;; 12 bits: Sync pulse width 2*(n+1) cycles (standard value 353 => 4.697us)
+;; 12 bits: Sync pulse width n+32 cycles (standard value 676 => 4.697us)
 ;;  3 bits: Burst first-half value    } starting at T_BURST, repeated
 ;;  3 bits: Burst second-half value   } 10 times for HTC cycles each
 ;;  3 bits: Pre-burst transition value, starts Q2 cycles before T_BURST
@@ -50,7 +50,7 @@ loop:
 ;;  6 bits: Burst-to-active delay 17*(n+2) cycles, or 0 if not active line
 ;;  2 bits: 0 => active line; 2 => inactive full line; 3 => half line
 ;;
-;; Burst and active video may only occur when sync width was standard (353).
+;; Burst and active video may only occur when sync width was standard (676).
 ;; For no colour burst, set all four burst values to 4 (== blanking level).
 ;; Otherwise, depending on burst polarity, values are 6,2,3,5 or 2,6,5,3.
 ;; Colour burst starts 5.638us (25 colour cycles) after horizontal datum.
@@ -66,8 +66,8 @@ PUBLIC Start:
            wait irq, 0   ;; Full-line entry point at program address 2
            out x, 12     ;; Half-line entry point at program address 3
            wait irq, 0
-sync_loop: /* T=0 */
-           set pins, 0
+	   set pins, 0   [30] ;; for PAL we need more precision for the "SAWTOOTH HACK"
+sync_loop: /* T=31 */
            jmp x--, sync_loop
 /*  708 */ set pins, 4   [31] ;; <- time shown assumes x was 369
 /*  740 */ out y, 3      [31]

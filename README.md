@@ -3,7 +3,7 @@ Experiments to generate colour composite video output (NTSC/PAL) from Raspberry 
 
 I've targeted simplicity over high quality or standards compliance, and with little regard for EMC. Some colour and pattern artifacts are to be expected, due to the lack of proper filtering, and liberties taken with timings.
 
-This is a work in progress, largely undocumented and entirely without warranty. It may be broken from time to time or squashed/rebased without warning.
+This is a work in progress, largely undocumented and entirely without warranty. It may be broken from time to time or restructured without warning. It _might_ eventually coalesce into a usable library, at which point the following experiments will get moved into a subdirectory or branch:
 
 ## Experiment 1: Minimal
 
@@ -48,10 +48,19 @@ Since fields alternate between upper and lower *and* the colour-encoding phase c
 
 Although artifacts are significantly reduced compared to progressive, interlaced PAL still suffers from an unpleasant "dot-crawl" effect. That is because I'm still omitting the 25Hz precision offset.
 
+## Experiment 4: a hack to add the PAL precision offset
+
+Added as an option in `rough_interlace`. The PAL PIO program was tweaked so sync-pulse durations could be specified to single-cycle accuracy; then the sync pattern changed to gradually decrement the sync-pulse width throughout each field, causing colour burst and active regions to slide left, _shearing_ the picture undetectably.
+
+By this trick, the colour carrier gains half a cycle per field. This greatly reduces dot-crawl in solid colours (some remains at coloured edges, due to the lack of band-limiting). And we can still use the "4x4 texture lookup" method to implement colour palettes efficiently.
+
+We can only control phase to core-clock resolution (1/34 colour cycle) causing slight jitter, but PAL was designed to tolerate small phase errors. Since ITU-T BT.470-6 specifies most timings to &pm; 0.1 &mu;s and we are varying sync width and burst start by just &pm; 0.055 &mu;s, it is arguably compliant.
+
+I am in two minds whether this is a good idea or not.
+
 ### Things maybe to do:
 
- - Implement proper circular buffering à la scanvideo (maybe in broad strips for easier 3D rendering)
- - Fix up the half-lines (currently they are output as full lines, and in the PAL case impinge on vertical blanking)
- - Investigate if I can restore the PAL 25Hz precision offset, preferably without breaking palette lookups
+ - Implement proper circular buffering à la scanvideo (maybe in broad strips for easier 3D rendering) or even implement the `scanvideo` API (ugh)
+ - Fix up the half-lines (currently they are output as full lines, and in the PAL case impinge on vertical blanking, overriding one equalising pulse)
  - Investigate efficient ways to use different horizontal sample rates, which some emulators might want
  - Investigate efficient ways to filter the chroma components to reduce artifacts

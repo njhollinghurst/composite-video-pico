@@ -4,7 +4,7 @@ pico_generate_pio_header(rough_interlace ${CMAKE_CURRENT_LIST_DIR}/ntsc.pio)
 pico_generate_pio_header(rough_interlace ${CMAKE_CURRENT_LIST_DIR}/pal.pio)
 
 # Enable this for PAL
-if (0)
+if (1)
     target_compile_definitions(rough_interlace PRIVATE
         PAL=1
         PLL_SYS_REFDIV=2
