@@ -86,10 +86,6 @@
 uint8_t buffer[TOTAL_ROWS][SAMPLES_PER_ROW / 2];
 
 
-/*
- * Initialize the buffer to black and "paint" in the sync and burst pattern.
- */
-
 static void zero_nybbles(uint8_t * buffer, unsigned int offset, unsigned int width)
 {
   width += offset;
@@ -102,6 +98,10 @@ static void zero_nybbles(uint8_t * buffer, unsigned int offset, unsigned int wid
     buffer[width >> 1] &= 0xf0;
   }
 }
+
+/*
+ * Initialize the buffer to black, and "paint" the sync and burst pattern.
+ */
 
 void init_buffer()
 {
@@ -275,36 +275,35 @@ void mk_colour(uint8_t r, uint8_t g, uint8_t b, uint16_t pattern[4])
 {
 #ifdef PAL
 
-  // Convert to YUV. We want to scale U, V so that the 4.433 MHz component
-  // of our "steppy" U and V waveforms will have the same power as a pure
-  // sine wave at the specified level; which requires a boost of ~10%.
+  // Convert to YUV using the standard coefficients (see BT.470-6)
+  // Our "steppy" U and V waveforms have the same power as a pure sine wave
+  // of the same amplitude, though only about 81% of it is in the fundamental.
   int y = (77*r + 150*g + 29*b) >> 8;
-  int u = (138*(b-y) + 128) >> 8;
-  int v = (247*(r-y) + 128) >> 8;
+  int u = (128*(b-y) + 128) >> 8;
+  int v = (224*(r-y) + 128) >> 8;
 
-  // Generate the 4x4 pixel pattern; all rows are permutations of the
-  // top one (except for dithering). Black level is 4, white level 14.
+  // Generate the 4x4 pixel pattern; all rows are permutations of the top one.
+  // Black level is 4, white level 14. Add one bit of dithering, for greys.
   pattern[0] = CLIP((0x440 + 10 * (y - u)) >> 8) +
           16 * CLIP((0x4c0 + 10 * (y + v)) >> 8) +
          256 * CLIP((0x440 + 10 * (y + u)) >> 8) +
         4096 * CLIP((0x4c0 + 10 * (y - v)) >> 8);
-  pattern[1] = CLIP((0x4c0 + 10 * (y + v)) >> 8) +
-          16 * CLIP((0x440 + 10 * (y - u)) >> 8) +
-         256 * CLIP((0x4c0 + 10 * (y - v)) >> 8) +
-        4096 * CLIP((0x440 + 10 * (y + u)) >> 8);
+  pattern[1] = ((pattern[0] & 0xf0f0) >> 4) | ((pattern[0] & 0x0f0f) << 4);
   pattern[2] = (pattern[0] >> 8) | (pattern[0] << 8);
   pattern[3] = (pattern[1] >> 8) | (pattern[1] << 8);
 
 #else
 
-  // Convert to YUV. Although NTSC specifies I and Q, the underlying U, V
-  // are defined much as in PAL (if we ignore chroma bandwidth limiting).
-  // Due to a sampling phase difference we'll scale them by 1.1 / sqrt(2).
+  // Convert to YUV. NTSC specifies I and Q, but the underlying U and V
+  // are defined much as in PAL (if we ignore chroma bandwidth limiting);
+  // see NTSC Signal Specifications III.D/Notes. Although NTSC is not sRGB.
+  // This time U and V are square waves, so we'll scale down by sqrt(2).
   int y = (77*r + 150*g + 29*b) >> 8;
-  int u = (98*(b-y) + 128) >> 8;
-  int v = (175*(r-y) + 128) >> 8;
+  int u = (90*(b-y) + 128) >> 8;
+  int v = (160*(r-y) + 128) >> 8;
 
-  // Generate the 4x2 pixel pattern. For NTSC-M, black level is 5.
+  // Generate the 4x2 pixel pattern (for PAL/NTSC source-code compatibility
+  // it's doubled up to a 4x4 pattern). For NTSC-M, the black level is 5.
   pattern[0] = CLIP((0x510 + 9 * (y - u - v)) >> 8) +
           16 * CLIP((0x590 + 9 * (y - u + v)) >> 8) +
          256 * CLIP((0x510 + 9 * (y + u + v)) >> 8) +
@@ -320,7 +319,7 @@ void mk_colour(uint8_t r, uint8_t g, uint8_t b, uint16_t pattern[4])
 
 
 /*
- * Draw colour bars
+ * Draw colour bars and a Raspberry Pi logo
  */
 
 void draw_colour_bars()
@@ -369,13 +368,13 @@ void draw_raspberry()
       if (x1 == x0) x1 = RASPBERRY_WIDTH;
       c >>= 6;
       if (c < 3) {
-	if (x0 & 1) {
-	  scanline[x0>>1] = (scanline[x0>>1] & 0xf) | ((palette[c][i & 3] >> (4 * (x0 & 3))) << 4);
-	  x0++;
-	}
-	for (;x0 < x1; x0 += 2) {
-	  scanline[x0>>1] = palette[c][i & 3] >> (4 * (x0 & 2));
-	}
+        if (x0 & 1) {
+          scanline[x0>>1] = (scanline[x0>>1] & 0xf) | ((palette[c][i & 3] >> (4 * (x0 & 3))) << 4);
+          x0++;
+        }
+        for (;x0 < x1; x0 += 2) {
+          scanline[x0>>1] = palette[c][i & 3] >> (4 * (x0 & 2));
+        }
       }
       x0 = x1;
     }
@@ -383,7 +382,7 @@ void draw_raspberry()
 }
 
 /*
- * Draw counter
+ * Draw a frame counter
  */
 
 void draw_counter(unsigned int n)
@@ -413,9 +412,9 @@ void draw_counter(unsigned int n)
       0x59eeee95,
       0xbee55ee9,
       0xbee55555,
-      0x59eee955,
-      0x5559ee95,
-      0x95555ee9,
+      0x5bee5555,
+      0x559ee955,
+      0x5555ee95,
       0x9eeeeeeb,
       0x55555555,
     },
@@ -462,10 +461,10 @@ void draw_counter(unsigned int n)
     {
       0x9eeeeee9,
       0x9ee55555,
-      0x5ee95555,
       0x59ee5555,
       0x55ee9555,
       0x559ee555,
+      0x555ee955,
       0x555ee955,
       0x55555555,
     },
