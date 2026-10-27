@@ -1,0 +1,104 @@
+;;;Copyright (c) 2026 Raspberry Pi Ltd.
+;;;
+;;; SPDX-License-Identifier: BSD-3-Clause
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; PIO programs to generate PAL-BDGHIK, assuming a core clock of 150.75 MHz.
+;; We need one whole PIO and use three SMs (timer, sync/burst, active video)
+;; and two DMA channels (for sync/burst codes, and 4- or 8-bit raw video).
+;; Sync program must be at address 0. All programs use autopull (32-bit, LE).
+;; Both the sync/burst and active video SMs driver GPIOs 15:12
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.pio_version 0
+
+.define BURST_CYCLES  10
+.define TC            34
+.define HTC      (TC>>1)
+.define Q1      (HTC>>1)
+.define Q2      (HTC-Q1)
+.define T_SYNC       708
+.define T_BURST      850
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Timer program. Raise IRQ 0 once every half-scanline.
+;; Initialize by pushing the value (half_scanline_cycles - 3).
+;; At 150.75 MHz, the value should be 4821
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.program timer
+        out y, 32
+.wrap_target
+        mov x, y
+loop:
+        jmp x--, loop
+        irq set 0
+.wrap
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Sync-and-burst generating program. This program uses a computed jump
+;; and must be loaded at address 0 and started from the symbol Start.
+;; It reads a series of 32-bit codes with the following fields (in LE order)
+;; each generating one sync pulse with optional colour-burst and optionally
+;; raising IRQ 1 for active video.
+;;
+;; 12 bits: Sync pulse width n+32 cycles (standard value 676 => 4.697us)
+;;  3 bits: Burst first-half value    } starting at T_BURST, repeated
+;;  3 bits: Burst second-half value   } 10 times for HTC cycles each
+;;  3 bits: Pre-burst transition value, starts Q2 cycles before T_BURST
+;;  3 bits: Post-burst transition value, overlaps with the following delay
+;;  6 bits: Burst-to-active delay 17*(n+2) cycles, or 0 if not active line
+;;  2 bits: 0 => active line; 2 => inactive full line; 3 => half line
+;;
+;; Burst and active video may only occur when sync width was standard (676).
+;; For no colour burst, set all four burst values to 4 (== blanking level).
+;; Otherwise, depending on burst polarity, values are 6,2,3,5 or 2,6,5,3.
+;; Colour burst starts 5.638us (25 colour cycles) after horizontal datum.
+;; The standard burst-to-active delay is 24 => 2.932us, for a 912-sample
+;; active region starting 10.826us (48 colour cycles) after horizontal datum.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.program pal_sync
+.origin 0
+           jmp x--, 0    [HTC-1]
+/* 1631 */ irq set 1     ;; one cycle before active
+PUBLIC Start:
+           wait irq, 0   ;; Full-line entry point at program address 2
+           out x, 12     ;; Half-line entry point at program address 3
+           wait irq, 0
+	   set pins, 0   [30] ;; for PAL we need more precision for the "SAWTOOTH HACK"
+sync_loop: /* T=31 */
+           jmp x--, sync_loop
+/*  708 */ set pins, 4   [31] ;; <- time shown assumes x was 369
+/*  740 */ out y, 3      [31]
+/*  772 */ out isr, 3    [(T_BURST-Q2-T_SYNC-129)]
+/*  777 */ nop           [31] ;; for PAL we need this extra delay!
+/*  809 */ set x, (BURST_CYCLES-1) [31]
+/*  841 */ out pins, 3   [Q2-1]
+burst_loop: /* 850 */
+           mov pins, y   [HTC-1]
+           mov pins, isr [HTC-2]
+           jmp x--, burst_loop
+/* 1190 */ out pins, 3   [Q2-1]
+/* 1199 */ set pins, 4   [Q1-4]
+/* 1204 */ out x, 6
+/* 1205 */ out pc, 2
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Clock out a line of pixels at 4bpp (LE), at 17.735294 MHz (about 4 * fc).
+;; Initialize by pushing the value (line_length_in_samples/2 - 1)
+;; For 32-bit DMA, line_length_in_samples should be a multiple of 8.
+;; All samples (nybbles) should normally be in the range 0x3 .. 0xF.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.program scanlines_4bpp_div8p5
+        out y, 32
+.wrap_target
+        set pins, 4
+        mov x, y
+        wait irq, 1
+out_loop:
+        out pins, 4 [Q1-1]
+        out pins, 4 [Q2-2]
+        jmp x--, out_loop
+.wrap
