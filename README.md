@@ -33,7 +33,7 @@ By default this builds for NTSC-M, but can be changed to PAL by editing [CMakeLi
 
 This example demonstrates the use of a 256-colour palette to simplify software-based colour encoding, based on 4x4-pixel "textures". The chosen palette is a 6x6x6 colour-cube plus 40 grey levels (of which 20 can be distinguished using a spot of dithering).
 
-The colour-cube palette is illustrated by a gratuitous 3D animation.
+The colour-cube palette (or at least, its outer faces) is illustrated by a gratuitous 3D animation.
 
 ![Colour cube demo](doc/ccube_viz.png)
 
