@@ -64,14 +64,19 @@
 #define ACTIVE_WIDTH                 912
 #else
 #define CORE_FREQ_KHZ             157500 // 157.5 MHz
+//#define ARTIFACT_COLOUR  // <-- experimental; not all monitors accept it!
+#ifdef ARTIFACT_COLOUR
+#define CYCLES_PER_ROW             10032 // 15699.76 Hz
+#else
 #define CYCLES_PER_ROW             10010 // 15734.266 Hz
+#endif
 #define CYCLES_PER_SAMPLE             11 // 14.318182 MHz == 4*f_c
 #define SAMPLE_RATE               (CORE_FREQ_KHZ*1000.0/CYCLES_PER_SAMPLE)
 #define TOTAL_ROWS                   262
 #define SAMPLES_PER_ROW              896
 #define SYNC_PULSE_WIDTH          ((int)(SAMPLE_RATE*4.7e-6))
 #define EQ_PULSE_WIDTH            ((int)(SAMPLE_RATE*2.31e-6))
-#define BROAD_PULSE_WIDTH         ((int)(SAMPLE_RATE*27.1e-6))
+#define BROAD_PULSE_WIDTH         ((int)(CYCLES_PER_ROW/(2*CYCLES_PER_SAMPLE) - SYNC_PULSE_WIDTH))
 #define ACTIVE_START_ROW              22
 #define ACTIVE_START_COL             136
 #define ACTIVE_HEIGHT                240
@@ -172,7 +177,11 @@ void init_buffer()
         { 0x44, 0x54, 0x22, 0x66, 0x22, 0x66, 0x22, 0x66, 0x22, 0x66, 0x22, 0x66,
           0x22, 0x66, 0x22, 0x66, 0x22, 0x66, 0x22, 0x66, 0x43, 0x44, 0x44, 0x44 },
       };
+#ifdef ARTIFACT_COLOUR
+      memcpy(buffer[i] + 36, burst[0], 24);
+#else
       memcpy(buffer[i] + 36, burst[i & 1], 24);
+#endif
     }
 #endif
   }
@@ -308,7 +317,11 @@ void mk_colour(uint8_t r, uint8_t g, uint8_t b, uint16_t pattern[4])
           16 * CLIP((0x590 + 9 * (y - u + v)) >> 8) +
          256 * CLIP((0x510 + 9 * (y + u + v)) >> 8) +
         4096 * CLIP((0x590 + 9 * (y + u - v)) >> 8);
+#ifdef ARTIFACT_COLOUR
+  pattern[1] = pattern[0];
+#else
   pattern[1] = (pattern[0] >> 8) | (pattern[0] << 8);
+#endif
   pattern[2] = pattern[0];
   pattern[3] = pattern[1];
 
