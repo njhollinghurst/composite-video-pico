@@ -129,15 +129,15 @@ static int make_visible_triangles()
       cq = -cq;
     }
 
-    basis[0][0] = sgn*R[axis][0] >> 2;
-    basis[0][1] = sgn*R[axis][1] >> 2;
-    basis[0][2] = sgn*R[axis][2] >> 2;
-    basis[1][0] = sgn*R[(axis+3+sgn)%3][0] >> 2;
-    basis[1][1] = sgn*R[(axis+3+sgn)%3][1] >> 2;
-    basis[1][2] = sgn*R[(axis+3+sgn)%3][2] >> 2;
-    basis[2][0] = sgn*R[(axis+3-sgn)%3][0] >> 2;
-    basis[2][1] = sgn*R[(axis+3-sgn)%3][1] >> 2;
-    basis[2][2] = sgn*R[(axis+3-sgn)%3][2] >> 2;
+    basis[0][0] = sgn*R[axis][0] / 4;
+    basis[0][1] = sgn*R[axis][1] / 4;
+    basis[0][2] = sgn*R[axis][2] / 4;
+    basis[1][0] = sgn*R[(axis+3+sgn)%3][0] / 4;
+    basis[1][1] = sgn*R[(axis+3+sgn)%3][1] / 4;
+    basis[1][2] = sgn*R[(axis+3+sgn)%3][2] / 4;
+    basis[2][0] = sgn*R[(axis+3-sgn)%3][0] / 4;
+    basis[2][1] = sgn*R[(axis+3-sgn)%3][1] / 4;
+    basis[2][2] = sgn*R[(axis+3-sgn)%3][2] / 4;
 
     for(int p = 0; p < 7; ++p) {
       for(int q = 0; q < 7; ++q) {
@@ -185,9 +185,9 @@ static void draw_triangle(uint8_t *buffer, int32_t v0, int32_t v1, int32_t v2,
   int32_t slope02 = (v2 >> 16) - (v0 >> 16);
   int32_t slope01 = (v1 >> 16) - (v0 >> 16);
   int32_t slope12 = (v2 >> 16) - (v1 >> 16);
-  slope02 = (slope02) ? ((1 << 18) * ((v2 & 0xffff) - (v0 & 0xffff)) + (slope02 >> 1)) / slope02 : 0;
-  slope01 = (slope01) ? ((1 << 18) * ((v1 & 0xffff) - (v0 & 0xffff)) + (slope01 >> 1)) / slope01 : 0;
-  slope12 = (slope12) ? ((1 << 18) * ((v2 & 0xffff) - (v1 & 0xffff)) + (slope12 >> 1)) / slope12 : 0;
+  slope02 = (slope02) ? ((1 << 18) * ((v2 & 0xffff) - (v0 & 0xffff))) / slope02 : 0;
+  slope01 = (slope01) ? ((1 << 18) * ((v1 & 0xffff) - (v0 & 0xffff))) / slope01 : 0;
+  slope12 = (slope12) ? ((1 << 18) * ((v2 & 0xffff) - (v1 & 0xffff))) / slope12 : 0;
   // iterate over all the integer Y positions that are inside the triangle
   for(int i = (v0 >= 0) ? ((v0 + 0xf0000) >> 20) : 0; i <= (v2 >> 20) && i < stripe_height; ++i) {
     int x0, x1;
@@ -196,7 +196,7 @@ static void draw_triangle(uint8_t *buffer, int32_t v0, int32_t v1, int32_t v2,
       x1 = (v0 << 18) + slope01 * (int32_t)(16*i - (v0 >> 16));
     }
     else {
-      x1 = (v2 << 18) + slope12 * (int32_t)(16*i - (v2 >> 16));
+      x1 = (v1 << 18) + slope12 * (int32_t)(16*i - (v1 >> 16));
     }
     if (x1 < x0) { int32_t t = x0; x0 = x1; x1 = t; }
     x0 >>= 21;
