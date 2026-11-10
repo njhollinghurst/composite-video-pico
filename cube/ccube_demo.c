@@ -9,7 +9,7 @@
 
 #include "ccube_demo.h"
 
-#define MAXT (3*6*6*2) // Maximum number of visible triangles (3 cube face) in the animation
+#define MAXT 1296 // Maximum number of visible triangles in the animation
 
 /* Global state */
 
@@ -19,10 +19,18 @@ static int ccube_pal = 0;
 static int ccube_nt = 0;
 static int32_t ccube_triangs[MAXT][4]; // Display (Y<<16)|X in units of pixel/8; last entry is colour
 static uint16_t ccube_palette[256][4];
-static int32_t R[3][3] = { // Rotation matrix, initial values (Q14)
-  { 16384, 0, 0 },
-  { 0, 16384, 0 },
-  { 0, 0, 16384 },
+static uint32_t ccube_explode_timer;
+static int ccube_explode;
+
+static int32_t R[3][3] = { // Rotation matrix, initial values (Q12)
+  { 4096, 0, 0 },
+  { 0, 4096, 0 },
+  { 0, 0, 4096 },
+};
+static int32_t S[3][3] = { // Expanded matrix
+  { 4096, 0, 0 },
+  { 0, 4096, 0 },
+  { 0, 0, 4096 },
 };
 
 
@@ -110,117 +118,144 @@ static void mk_palette()
     if ((a) > (b)) tmp = (a), (a) = (b), (b) = tmp;  \
   } while (0)                                        \
 
-static int make_visible_triangles()
+static void make_cubie(int r, int g, int b, int bmap)
 {
-  int ntriang = 0;
+  int ntriang = ccube_nt;
 
   // for each axis XYZ, construct only the cube-face that faces towards us
   for(int axis = 0; axis < 3; axis++) {
-    static const int primary_colours[3] = { 1, 6, 36 };
-    int32_t basis[3][3];
-    int32_t vv[7][8];
-    int sgn = (R[axis][2] < 0) ? 1 : -1;
-    int c0 = 5 * primary_colours[axis];
-    int cp = primary_colours[(axis+3+sgn)%3];
-    int cq = primary_colours[(axis+3-sgn)%3];
-    if (sgn<0) {
-      c0 = 215 - c0;
-      cp = -cp;
-      cq = -cq;
-    }
+    for(int sgn = -1; sgn <= 1; sgn += 2) {
+      int32_t basis[4][3];
+      int32_t vv[2][2];
 
-    basis[0][0] = sgn*R[axis][0] / 4;
-    basis[0][1] = sgn*R[axis][1] / 4;
-    basis[0][2] = sgn*R[axis][2] / 4;
-    basis[1][0] = sgn*R[(axis+3+sgn)%3][0] / 4;
-    basis[1][1] = sgn*R[(axis+3+sgn)%3][1] / 4;
-    basis[1][2] = sgn*R[(axis+3+sgn)%3][2] / 4;
-    basis[2][0] = sgn*R[(axis+3-sgn)%3][0] / 4;
-    basis[2][1] = sgn*R[(axis+3-sgn)%3][1] / 4;
-    basis[2][2] = sgn*R[(axis+3-sgn)%3][2] / 4;
+      if ((sgn > 0) ? !(bmap & (8<<axis)) : !(bmap & (1<<axis)))
+        continue;
 
-    for(int p = 0; p < 7; ++p) {
-      for(int q = 0; q < 7; ++q) {
-        int x = (3*basis[0][0] + (p-3)*basis[1][0] + (q-3)*basis[2][0]);
-        int y = (3*basis[0][1] + (p-3)*basis[1][1] + (q-3)*basis[2][1]);
-        int z = (3*basis[0][2] + (p-3)*basis[1][2] + (q-3)*basis[2][2]);
-        z = (ccube_frame_height << 19) / ((3<<15) + z);
-        x = (x * z) >> 15;
-        y = (y * z) >> 15;
-        vv[p][q] = ((ccube_frame_height << 18) + (ccube_width_in_bytes << 3)) + x + (x >> 2) - (y << 16);
+      basis[0][0] = (2*r-5)*S[0][0] + (2*g-5)*S[1][0] + (2*b-5)*S[2][0] + sgn*R[axis][0];
+      basis[0][1] = (2*r-5)*S[0][1] + (2*g-5)*S[1][1] + (2*b-5)*S[2][1] + sgn*R[axis][1];
+      basis[0][2] = (2*r-5)*S[0][2] + (2*g-5)*S[1][2] + (2*b-5)*S[2][2] + sgn*R[axis][2];
+      basis[1][0] = sgn*R[(axis+3+sgn)%3][0];
+      basis[1][1] = sgn*R[(axis+3+sgn)%3][1];
+      basis[1][2] = sgn*R[(axis+3+sgn)%3][2];
+      basis[2][0] = sgn*R[(axis+3-sgn)%3][0];
+      basis[2][1] = sgn*R[(axis+3-sgn)%3][1];
+      basis[2][2] = sgn*R[(axis+3-sgn)%3][2];
+
+      for(int p = 0; p < 2; ++p) {
+        for(int q = 0; q < 2; ++q) {
+          int x = basis[0][0] + (2*p-1)*basis[1][0] + (2*q-1)*basis[2][0];
+          int y = basis[0][1] + (2*p-1)*basis[1][1] + (2*q-1)*basis[2][1];
+          int z = basis[0][2] + (2*p-1)*basis[1][2] + (2*q-1)*basis[2][2];
+          z = (ccube_frame_height << 19) / ((9<<14) + z);
+          x = (x * z) >> 16;
+          y = (y * z) >> 16;
+          vv[p][q] = ((ccube_frame_height << 18) + (ccube_width_in_bytes << 3)) + x + (x >> 2) - (y << 16);
+          if ((vv[p][q]&0xffff) >= (ccube_width_in_bytes<<4)) goto skip;
+        }
       }
+      if (((vv[0][0] & 0xffff) - (vv[0][1] & 0xffff)) * ((vv[0][0] >> 16) - (vv[1][0] >> 16)) <
+          ((vv[0][0] >> 16) - (vv[0][1] >> 16)) * ((vv[0][0] & 0xffff) - (vv[1][0] & 0xffff))) {
+        // face really is visible
+        int32_t t0, t1, t2;
+        t0 = vv[0][0];
+        t1 = vv[0][1];
+        t2 = vv[1][0];
+        SORT3(t0, t1, t2);
+        ccube_triangs[ntriang][0] = t0;
+        ccube_triangs[ntriang][1] = t1;
+        ccube_triangs[ntriang][2] = t2;
+        ccube_triangs[ntriang++][3] = r + 6*g + 36*b;
+        t0 = vv[1][1];
+        t1 = vv[0][1];
+        t2 = vv[1][0];
+        SORT3(t0, t1, t2);
+        ccube_triangs[ntriang][0] = t0;
+        ccube_triangs[ntriang][1] = t1;
+        ccube_triangs[ntriang][2] = t2;
+        ccube_triangs[ntriang++][3] = r + 6*g + 36*b;
+      }
+    skip:;
     }
-    if (((vv[0][0] & 0xffff) - (vv[0][6] & 0xffff)) * ((vv[0][0] >> 16) - (vv[6][0] >> 16)) <
-        ((vv[0][0] >> 16) - (vv[0][6] >> 16)) * ((vv[0][0] & 0xffff) - (vv[6][0] & 0xffff))) {
-      // face really is visible - output the 6x6 colour squares
-      for(int p = 0; p < 6; ++p) {
-        for(int q = 0; q < 6; ++q) {
-          int32_t t0, t1, t2;
-          t0 = vv[p][q];
-          t1 = vv[p][q+1];
-          t2 = vv[p+1][q];
-          SORT3(t0, t1, t2);
-          ccube_triangs[ntriang][0] = t0;
-          ccube_triangs[ntriang][1] = t1;
-          ccube_triangs[ntriang][2] = t2;
-          ccube_triangs[ntriang++][3] = c0 + p*cp + q*cq;
-          t0 = vv[p+1][q+1];
-          t1 = vv[p][q+1];
-          t2 = vv[p+1][q];
-          SORT3(t0, t1, t2);
-          ccube_triangs[ntriang][0] = t0;
-          ccube_triangs[ntriang][1] = t1;
-          ccube_triangs[ntriang][2] = t2;
-          ccube_triangs[ntriang++][3] = c0 + p*cp + q*cq;
+  }
+  ccube_nt = ntriang;
+}
+
+// Construct the 6x6x6 colour-cube visualization out of coloured "cubies".
+// This function decides which cube-faces (each comprising two triangles)
+// to draw, and draws them in (approximate) back-to-front order. It is a
+// pile of ad-hoc hacks/heuristics, since we are close to the limit of what
+// two RP2040 ARM cores can render at 150 MHz. Notably, to avoid tearing,
+// we cull an increasing number of rear cubies as the cube collapses.
+
+static void make_visible_triangles()
+{
+  int axes[3];
+
+  ccube_nt = 0;
+
+  axes[0] = 4 * ((R[0][2] < 0) ? -R[0][2] : R[0][2]);
+  axes[1] = 4 * ((R[1][2] < 0) ? -R[1][2] : R[1][2]) + 1;
+  axes[2] = 4 * ((R[2][2] < 0) ? -R[2][2] : R[2][2]) + 2;
+  SORT3(axes[0], axes[1], axes[2]);
+  for(int i2 = 0; i2 < 6; ++i2) {
+    for(int i1 = 0; i1 < 6; ++i1) {
+      for(int i0 = 0; i0 < 6; ++i0) {
+        if (56 * (i0 + i1 + i2) > 512 - ccube_explode) {
+          int rgb[4];
+          rgb[axes[0] & 3] = i0;
+          rgb[axes[1] & 3] = i1;
+          rgb[axes[2] & 3] = i2;
+          if (R[0][2] > 0) rgb[0] = 5-rgb[0];
+          if (R[1][2] > 0) rgb[1] = 5-rgb[1];
+          if (R[2][2] > 0 ) rgb[2] = 5-rgb[2];
+          if (ccube_explode > 256 || i0 >= 5 || i1 >= 5 || i2 >= 5 || i0 == 0 || i1 == 0 || i2 == 0) {
+            int bmap = 0;
+            if (ccube_explode > 256) {
+              bmap = 63;
+            }
+            else {
+              if (rgb[0] == 0) bmap |= 1;
+              if (rgb[1] == 0) bmap |= 2;
+              if (rgb[2] == 0) bmap |= 4;
+              if (rgb[0] == 5) bmap |= 8;
+              if (rgb[1] == 5) bmap |= 16;
+              if (rgb[2] == 5) bmap |= 32;
+            }
+            make_cubie(rgb[0], rgb[1], rgb[2], bmap);
+          }
         }
       }
     }
   }
-  return ntriang;
 }
 
 static void draw_triangle(uint8_t *buffer, int32_t v0, int32_t v1, int32_t v2,
-                          uint16_t pattern[4], int stripe_height, int chroma_phase)
+                          uint16_t pattern[4], int stripe_height, int chroma_phase, int stride_in_bytes)
 {
+  int i;
   int32_t slope02 = (v2 >> 16) - (v0 >> 16);
   int32_t slope01 = (v1 >> 16) - (v0 >> 16);
   int32_t slope12 = (v2 >> 16) - (v1 >> 16);
-  slope02 = (slope02) ? ((1 << 18) * ((v2 & 0xffff) - (v0 & 0xffff))) / slope02 : 0;
-  slope01 = (slope01) ? ((1 << 18) * ((v1 & 0xffff) - (v0 & 0xffff))) / slope01 : 0;
-  slope12 = (slope12) ? ((1 << 18) * ((v2 & 0xffff) - (v1 & 0xffff))) / slope12 : 0;
+  slope02 = (slope02) ? ((v2 - v0) << 18) / slope02 : 0;
+  slope01 = (slope01) ? ((v1 - v0) << 18) / slope01 : 0;
+  slope12 = (slope12) ? ((v2 - v1) << 18) / slope12 : 0;
   // iterate over all the integer Y positions that are inside the triangle
-  for(int i = (v0 >= 0) ? ((v0 + 0xf0000) >> 20) : 0; i <= (v2 >> 20) && i < stripe_height; ++i) {
-    int x0, x1;
-    x0 = (v0 << 18) + slope02 * (int32_t)(16*i - (v0 >> 16));
-    if ((i << 20) < v1) {
-      x1 = (v0 << 18) + slope01 * (int32_t)(16*i - (v0 >> 16));
-    }
-    else {
-      x1 = (v1 << 18) + slope12 * (int32_t)(16*i - (v1 >> 16));
-    }
+  for(i = (v0 >= 0) ? (v0 >> 20) + 1 : 0; i <= (v1 >> 20); ++i) {
+    if (i >= stripe_height) return;
+    int x0 = (v0 << 18) + slope02 * (int32_t)(16*i - (v0 >> 16));
+    int x1 = (v0 << 18) + slope01 * (int32_t)(16*i - (v0 >> 16));
     if (x1 < x0) { int32_t t = x0; x0 = x1; x1 = t; }
     x0 >>= 21;
-    x1 = (x1 >> 21) - x0 + 1;
-    uint32_t *p = (uint32_t *)(buffer + i * ccube_width_in_bytes) + (x0 >> 3);
-    uint32_t c = pattern[(i + chroma_phase) & 3];
-    c |= (c << 16);
-    if (x0 & 7) { // draw misaligned start (up to 7 nybbles)
-      uint32_t mask = 0xffffffff;
-      if (x1 < 8) mask >>= 4 * (8 - x1);
-      mask <<= 4 * (x0 & 7);
-      p[0] = (p[0] & ~mask) | (c & mask);
-      p++;
-      x1 -= 8 - (x0 & 7);
-      if (x1 < 1) continue;
-    }
-    for(; x1 >= 8; x1 -= 8) {
-      *p++ = c;
-    }
-    if (x1) { // draw misaligned end (up to 7 nybbles)
-      uint32_t mask = 0xffffffff;
-      mask <<= 4 * (x1 & 7);
-      *p = (*p & mask) | (c & ~mask);
-    }
+    x1 >>= 21;
+    hfill_nybble_pattern(buffer + i * stride_in_bytes, pattern[(i + chroma_phase)&3], x0, x1);
+  }
+  for(; i <= (v2 >> 20) && i < stripe_height; ++i) {
+    int x0 = (v0 << 18) + slope02 * (int32_t)(16*i - (v0 >> 16));
+    int x1 = (v1 << 18) + slope12 * (int32_t)(16*i - (v1 >> 16));
+    if (x1 < x0) { int32_t t = x0; x0 = x1; x1 = t; }
+    x0 >>= 21;
+    x1 >>= 21;
+    hfill_nybble_pattern(buffer + i * stride_in_bytes, pattern[(i + chroma_phase)&3], x0, x1);
   }
 }
 
@@ -229,14 +264,21 @@ void ccube_demo_init(int width_in_nybbles, int full_frame_height, int pal)
   ccube_width_in_bytes = width_in_nybbles >> 1;
   ccube_frame_height = full_frame_height;
   ccube_pal = pal;
+  ccube_explode_timer = 0;
+  ccube_explode = 256;
 
   memset(R, 0, sizeof(R));
-  R[0][0] = 16384;
-  R[1][1] = 16384;
-  R[2][2] = 16384;
+  R[0][0] = 4096;
+  R[1][1] = 4096;
+  R[2][2] = 4096;
+
+  memset(S, 0, sizeof(S));
+  S[0][0] = 4096;
+  S[1][1] = 4096;
+  S[2][2] = 4096;
 
   mk_palette();
-  ccube_nt = make_visible_triangles();
+  make_visible_triangles();
 }
 
 void ccube_demo_render(void *buffer, int start_y, int stripe_height, int chroma_phase)
@@ -252,7 +294,7 @@ void ccube_demo_render(void *buffer, int start_y, int stripe_height, int chroma_
     int32_t v1 = ccube_triangs[t][1] - (start_y << 19);
     int32_t v2 = ccube_triangs[t][2] - (start_y << 19);
     if (v2 > 0 && v0 < (stripe_height << 20)) {
-      draw_triangle(p8, v0, v1, v2, ccube_palette[ccube_triangs[t][3]], stripe_height, chroma_phase);
+      draw_triangle(p8, v0, v1, v2, ccube_palette[ccube_triangs[t][3] & 255], stripe_height, chroma_phase, ccube_width_in_bytes);
     }
   }
 }
@@ -294,9 +336,24 @@ void ccube_demo_update()
   };
   for(i = 0; i < 3; i++) {
     for(j = 0; j < 3; j++) {
-      R[i][j] = (R1[i][0]*R2[0][j] + R1[i][1]*R2[1][j] + R1[i][2]*R2[2][j] + 8192) >> 14;
+      R[i][j] = (R1[i][0]*R2[0][j] + R1[i][1]*R2[1][j] + R1[i][2]*R2[2][j] + 32768) >> 16;
     }
   }
 
-  ccube_nt = make_visible_triangles();
+  if (ccube_explode_timer < 1024)
+    ccube_explode = 256;
+  else if (ccube_explode_timer < 2032)
+    ccube_explode = (512 + 15*ccube_explode) >> 4;
+  else
+    ccube_explode -= 12;
+
+  for(i = 0; i < 3; i++) {
+    for(j = 0; j < 3; j++) {
+      S[i][j] = (R[i][j] * ccube_explode + 128) >> 8;
+    }
+  }
+
+  ccube_explode_timer = (ccube_explode_timer + 1) & 2047;
+
+  make_visible_triangles();
 }

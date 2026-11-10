@@ -11,6 +11,7 @@
 #include "pico/stdlib.h"
 #include "pico/time.h"
 #include "pico/sem.h"
+#include "pico/multicore.h"
 #include "hardware/dma.h"
 #include "hardware/gpio.h"
 #include "hardware/clocks.h"
@@ -219,17 +220,17 @@ static int init_syncburst(unsigned int active_width, unsigned int active_height)
 
 /*
  * Instead of a whole frame or field buffer, we now use a pair of "stripe buffers"
- * each just 8 lines tall. Remember that ACTIVE_HEIGHT is height of a single field.
+ * each 1/6 of a field tall. Remember that ACTIVE_HEIGHT is height of a single field.
  */
 
 #if PAL
 #define ACTIVE_HEIGHT 288
 #define ACTIVE_WIDTH  912
-#define NUM_STRIPES    36
+#define NUM_STRIPES     4
 #else
 #define ACTIVE_HEIGHT 240
 #define ACTIVE_WIDTH  752
-#define NUM_STRIPES    30
+#define NUM_STRIPES     4
 #endif
 
 uint8_t buffer[2][ACTIVE_HEIGHT/NUM_STRIPES][ACTIVE_WIDTH/2];
@@ -357,7 +358,7 @@ void setup_pio_and_dma(int n)
  * Draw some ASCII text (same in both fields)
  */
 
-void draw_text(uint8_t *ptr, int x, int y, const char *str)
+void draw_text_transparent(uint8_t *ptr, int x, int y, const char *str)
 {
   ptr += (y * ACTIVE_WIDTH >> 1) + (x >> 1);
   for(int i = 0; i < 8; i++) {
@@ -365,14 +366,26 @@ void draw_text(uint8_t *ptr, int x, int y, const char *str)
     ptr += ACTIVE_WIDTH >> 1;
     for(const char *sp = str; *sp; sp++) {
       static const uint16_t explode_nybble[16] = {
-        0x5555, 0x555e, 0x55e5, 0x55ee, 0x5e55, 0x5e5e, 0x5ee5, 0x5eee,
-        0xe555, 0xe55e, 0xe5e5, 0xe5ee, 0xee55, 0xee5e, 0xeee5, 0xeeee
+        0x0000, 0x000f, 0x00f0, 0x00ff, 0x0f00, 0x0f0f, 0x0ff0, 0x0fff,
+        0xf000, 0xf00f, 0xf0f0, 0xf0ff, 0xff00, 0xff0f, 0xfff0, 0xffff
       };
       unsigned int pattern =
         simple_bold_font_8x8_le1bit[(*sp >= ' ' && *sp <= '~') ? *sp - ' ' : 0][i];
-      *p16++ = explode_nybble[pattern & 0xf];
-      *p16++ = explode_nybble[pattern >> 4];
+      *p16 = (*p16 & ~explode_nybble[pattern & 0xf]) | (0xeeee & explode_nybble[pattern & 0xf]);
+      p16++;
+      *p16 = (*p16 & ~explode_nybble[pattern >> 4]) | (0xeeee & explode_nybble[pattern >> 4]);
+      p16++;
     }
+  }
+}
+
+static void core1_main(void)
+{
+  while (true) {
+    uint32_t t = multicore_fifo_pop_blocking();
+    ccube_demo_render(buffer[t&255][ACTIVE_HEIGHT/NUM_STRIPES/2],
+                      (t>>16)&65535, ACTIVE_HEIGHT/NUM_STRIPES/2, (t>>8)&255);
+    multicore_fifo_push_blocking(0);
   }
 }
 
@@ -405,6 +418,9 @@ void main()
   int n = init_syncburst(ACTIVE_WIDTH, ACTIVE_HEIGHT);
   ccube_demo_init(ACTIVE_WIDTH, 2*ACTIVE_HEIGHT, PAL);
 
+  multicore_reset_core1();
+  multicore_launch_core1(core1_main);
+
   // start output
   setup_pio_and_dma(n);
 
@@ -418,18 +434,19 @@ void main()
   // Animation and rendering all happen in this loop
   while (true) {
     sem_acquire_blocking(&sem);
+    int cph = field_count >> 1;
 #ifdef PAL_PRECISION_HACK
-    ccube_demo_render(buffer[phase][0], 2 * stripe * ACTIVE_HEIGHT/NUM_STRIPES + !(field_count & 1),
-                      ACTIVE_HEIGHT/NUM_STRIPES, field_count/2 + 2*field_count);
-#else
-    ccube_demo_render(buffer[phase][0], 2 * stripe * ACTIVE_HEIGHT/NUM_STRIPES + !(field_count & 1),
-                      ACTIVE_HEIGHT/NUM_STRIPES, field_count/2);
+    cph += 2*field_count;
 #endif
+    multicore_fifo_push_blocking(phase + 256*(cph & 255) + 65536*(2 * stripe * ACTIVE_HEIGHT/NUM_STRIPES + ACTIVE_HEIGHT/NUM_STRIPES + !(field_count & 1)));
+    ccube_demo_render(buffer[phase][0], 2 * stripe * ACTIVE_HEIGHT/NUM_STRIPES + !(field_count & 1),
+                      ACTIVE_HEIGHT/NUM_STRIPES/2, field_count/2 + 2*field_count);
     if (stripe == 5*NUM_STRIPES/6) {
-      draw_text(buffer[phase][0], (ACTIVE_WIDTH - 73*8) / 2, 0, str);
+      draw_text_transparent(buffer[phase][0], (ACTIVE_WIDTH - 73*8) / 2, ACTIVE_HEIGHT/NUM_STRIPES/2-8, str);
     }
     phase = !phase;
     if (++stripe >= NUM_STRIPES) {
+      for(int s = 0; s < NUM_STRIPES; ++s) multicore_fifo_pop_blocking();
       ccube_demo_update();
       gpio_put(PICO_DEFAULT_LED_PIN, (++field_count & 16) ? 0 : 1);
       stripe = 0;

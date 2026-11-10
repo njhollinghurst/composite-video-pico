@@ -27,13 +27,13 @@ NTSC is encoded pretty much by-the-book. For PAL, a bodge was needed: I've reduc
 
 In both the NTSC and PAL standards, single-field output has some fairly bad colour artifacts.
 
-By default this builds for NTSC-M, but can be changed to PAL by editing [CMakeLists.txt](minimal/CMakeLists.txt)
+By default this example builds for NTSC-M, but can be changed to PAL by editing [CMakeLists.txt](minimal/CMakeLists.txt)
 
 ## Example 2: [Framebufferless 3D with interlace and palette](cube)
 
 This example demonstrates the use of a 256-colour palette to simplify software-based colour encoding, based on 4x4-pixel "textures". The chosen palette is a 6x6x6 colour-cube plus 40 grey levels (of which 20 can be distinguished using a spot of dithering).
 
-The colour-cube palette (or at least, its outer faces) is illustrated by a gratuitous 3D animation.
+The colour-cube palette is illustrated by a gratuitous 3D animation.
 
 ![Colour cube demo](doc/ccube_viz.png)
 
@@ -45,7 +45,7 @@ The PAL version now implements the standard colour frequency, by trickery. Succe
 
 Colour and texture artifacts are dramatically reduced compared to single-field output, though some remain at coloured edges (due to the lack of band-limiting).
 
-This example is framebufferless -- the 3D scene is rendered piecemeal into a pair of 8-row "stripe buffers". One CPU core is used for everything. By default it builds for PAL-BDGHIK, but can be changed to NTSC-M by editing [CMakeLists.txt](cube/CMakeLists.txt)
+This example is framebufferless -- the 3D scene is rendered piecemeal into a pair of "stripe buffers", each 1/4 of a field in height. By default it builds for PAL-BDGHIK, but can be changed to NTSC-M by editing [CMakeLists.txt](cube/CMakeLists.txt)
 
 ## Things maybe to do:
 

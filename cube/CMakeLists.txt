@@ -15,10 +15,10 @@ if (1)
     )
 endif()
 
-target_sources(cube PRIVATE cube.c ccube_demo.c ccube_demo.h simple_bold_font_8x8_le1bit.h)
+target_sources(cube PRIVATE cube.c ccube_demo.c hfill_nybble_pattern.S ccube_demo.h simple_bold_font_8x8_le1bit.h)
 
 # pull in common dependencies
-target_link_libraries(cube pico_stdlib hardware_pio hardware_dma)
+target_link_libraries(cube pico_stdlib pico_multicore hardware_pio hardware_dma)
 
 # create map/bin/hex file etc.
 pico_add_extra_outputs(cube)

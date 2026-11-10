@@ -15,3 +15,6 @@ extern void ccube_demo_init(int width_in_nybbles, int full_frame_height, int pal
 extern void ccube_demo_render(void *buffer, int start_y, int stripe_rows, int chroma_phase);
 
 extern void ccube_demo_update();
+
+// Assembler function -- this could be more generally useful?
+extern void hfill_nybble_pattern(void *ptr, uint32_t pattern, uint32_t x0, uint32_t x1);
