@@ -45,7 +45,7 @@ The PAL version now implements the standard colour frequency, by trickery. Succe
 
 Colour and texture artifacts are dramatically reduced compared to single-field output, though some remain at coloured edges (due to the lack of band-limiting).
 
-This example is framebufferless -- the 3D scene is rendered piecemeal into a pair of "stripe buffers", each 1/4 of a field in height. By default it builds for PAL-BDGHIK, but can be changed to NTSC-M by editing [CMakeLists.txt](cube/CMakeLists.txt)
+This example is framebufferless -- the 3D scene is rendered piecemeal into a ring of 4 "stripe buffers", each 1/12 of a field in height. By default it builds for PAL-BDGHIK, but can be changed to NTSC-M by editing [CMakeLists.txt](cube/CMakeLists.txt)
 
 ## Things maybe to do:
 

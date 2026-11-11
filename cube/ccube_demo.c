@@ -118,17 +118,21 @@ static void mk_palette()
     if ((a) > (b)) tmp = (a), (a) = (b), (b) = tmp;  \
   } while (0)                                        \
 
-static void make_cubie(int r, int g, int b, int bmap)
+static void make_cubie(int r, int g, int b, int all_faces)
 {
   int ntriang = ccube_nt;
 
-  // for each axis XYZ, construct only the cube-face that faces towards us
+  // Iterate over the 6 faces (3 axes * 2 directions)
   for(int axis = 0; axis < 3; axis++) {
     for(int sgn = -1; sgn <= 1; sgn += 2) {
       int32_t basis[4][3];
       int32_t vv[2][2];
 
-      if ((sgn > 0) ? !(bmap & (8<<axis)) : !(bmap & (1<<axis)))
+      // When the cube is not exploded, render only its outer surfaces
+      if (!all_faces &&
+	  ((axis == 0 && r + sgn != -1 && r + sgn != 6) ||
+	   (axis == 1 && g + sgn != -1 && g + sgn != 6) ||
+	   (axis == 2 && b + sgn != -1 && b + sgn != 6)))
         continue;
 
       basis[0][0] = (2*r-5)*S[0][0] + (2*g-5)*S[1][0] + (2*b-5)*S[2][0] + sgn*R[axis][0];
@@ -155,7 +159,7 @@ static void make_cubie(int r, int g, int b, int bmap)
       }
       if (((vv[0][0] & 0xffff) - (vv[0][1] & 0xffff)) * ((vv[0][0] >> 16) - (vv[1][0] >> 16)) <
           ((vv[0][0] >> 16) - (vv[0][1] >> 16)) * ((vv[0][0] & 0xffff) - (vv[1][0] & 0xffff))) {
-        // face really is visible
+        // face is oriented towards the camera -- split it into 2 triangles
         int32_t t0, t1, t2;
         t0 = vv[0][0];
         t1 = vv[0][1];
@@ -181,11 +185,10 @@ static void make_cubie(int r, int g, int b, int bmap)
 }
 
 // Construct the 6x6x6 colour-cube visualization out of coloured "cubies".
-// This function decides which cube-faces (each comprising two triangles)
-// to draw, and draws them in (approximate) back-to-front order. It is a
-// pile of ad-hoc hacks/heuristics, since we are close to the limit of what
-// two RP2040 ARM cores can render at 150 MHz. Notably, to avoid tearing,
-// we cull an increasing number of rear cubies as the cube collapses.
+// This function decides which cubies are visible, and generates them in
+// approximate back-to-front order. To reduce CPU load we use a heuristic:
+// when the large cube is only slightly "exploded", some rear layers of
+// cubies are culled, since they are unlikely to be visible.
 
 static void make_visible_triangles()
 {
@@ -197,33 +200,19 @@ static void make_visible_triangles()
   axes[1] = 4 * ((R[1][2] < 0) ? -R[1][2] : R[1][2]) + 1;
   axes[2] = 4 * ((R[2][2] < 0) ? -R[2][2] : R[2][2]) + 2;
   SORT3(axes[0], axes[1], axes[2]);
-  int m = (440 - ccube_explode) >> 5;
+  int m = (416 - ccube_explode) >> 5;
   for(int i2 = 0; i2 < 6; ++i2) {
     for(int i1 = 0; i1 < 6; ++i1) {
       for(int i0 = 0; i0 < 6; ++i0) {
         if (i2 >= m || i1 >= m || i0 >= m) {
-          int bmap;
-          int rgb[4];
+          int rgb[3];
           rgb[axes[0] & 3] = i0;
           rgb[axes[1] & 3] = i1;
           rgb[axes[2] & 3] = i2;
           if (R[0][2] > 0) rgb[0] = 5-rgb[0];
           if (R[1][2] > 0) rgb[1] = 5-rgb[1];
-          if (R[2][2] > 0 ) rgb[2] = 5-rgb[2];
-          if (ccube_explode > 256) {
-            bmap = 63;
-          }
-          else {
-            bmap = 0;
-            if (rgb[0] == 0) bmap |= 1;
-            if (rgb[1] == 0) bmap |= 2;
-            if (rgb[2] == 0) bmap |= 4;
-            if (rgb[0] == 5) bmap |= 8;
-            if (rgb[1] == 5) bmap |= 16;
-            if (rgb[2] == 5) bmap |= 32;
-            if (!bmap) continue;
-          }
-          make_cubie(rgb[0], rgb[1], rgb[2], bmap);
+          if (R[2][2] > 0) rgb[2] = 5-rgb[2];
+          make_cubie(rgb[0], rgb[1], rgb[2], ccube_explode > 256);
         }
       }
     }
@@ -343,11 +332,11 @@ void ccube_demo_update()
 
   if (ccube_explode_timer < 1024)
     ccube_explode = 256;
-  else if (ccube_explode_timer < 2032)
+  else if (ccube_explode_timer < 2048-32)
     ccube_explode = (512 + 15*ccube_explode) >> 4;
   else {
-    ccube_explode -= 16;
-    if (ccube_explode < 272) ccube_explode = 256;
+    ccube_explode -= 8;
+    if (ccube_explode < 264) ccube_explode = 256;
   }
 
   for(i = 0; i < 3; i++) {

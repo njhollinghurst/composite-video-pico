@@ -219,21 +219,23 @@ static int init_syncburst(unsigned int active_width, unsigned int active_height)
 }
 
 /*
- * Instead of a whole frame or field buffer, we now use a pair of "stripe buffers"
- * each 1/6 of a field tall. Remember that ACTIVE_HEIGHT is height of a single field.
+ * Instead of a whole frame or field buffer, we now cycle through 4 "stripe buffers"
+ * each 1/12 of a field tall. Remember that ACTIVE_HEIGHT is height of a single field.
  */
 
 #if PAL
 #define ACTIVE_HEIGHT 288
 #define ACTIVE_WIDTH  912
-#define NUM_STRIPES     4
+#define NUM_STRIPES    12
+#define NUM_PHASES      4
 #else
 #define ACTIVE_HEIGHT 240
 #define ACTIVE_WIDTH  752
-#define NUM_STRIPES     4
+#define NUM_STRIPES    12
+#define NUM_PHASES      4
 #endif
 
-uint8_t buffer[2][ACTIVE_HEIGHT/NUM_STRIPES][ACTIVE_WIDTH/2];
+uint8_t buffer[NUM_PHASES][ACTIVE_HEIGHT/NUM_STRIPES][ACTIVE_WIDTH/2];
 
 static void init_buffer() {
   memset(buffer, 0x44, sizeof(buffer));
@@ -250,11 +252,11 @@ static semaphore_t sem;
 
 void video_handler()
 {
-  static int pingpong = 0;
+  static unsigned int phase = 0;
   if (video_chan >= 0 && dma_channel_get_irq0_status(video_chan)) {
-    pingpong = !pingpong;
+    phase = (phase + 1) % NUM_PHASES;
     dma_channel_acknowledge_irq0(video_chan);
-    dma_channel_set_read_addr(video_chan, buffer[pingpong], true);
+    dma_channel_set_read_addr(video_chan, buffer[phase], true);
     sem_release(&sem);
   }
 }
@@ -424,11 +426,11 @@ void main()
   // start output
   setup_pio_and_dma(n);
 
-  // Wait for the penultimate stripe of the first field, now we can start on field #1 (an upper field)
-  for(int i = 0; i < NUM_STRIPES - 2; ++i) {
+  // Wait until we're clear to start rendering field #1 (an upper field)
+  for(int i = 0; i < NUM_STRIPES - NUM_PHASES; ++i) {
     sem_acquire_blocking(&sem);
   }
-  phase = (NUM_STRIPES & 1);
+  phase = NUM_STRIPES % NUM_PHASES;
   field_count = 1;
 
   // Animation and rendering all happen in this loop
@@ -444,7 +446,7 @@ void main()
     if (stripe == 5*NUM_STRIPES/6) {
       draw_text_transparent(buffer[phase][0], (ACTIVE_WIDTH - 73*8) / 2, ACTIVE_HEIGHT/NUM_STRIPES/2-8, str);
     }
-    phase = !phase;
+    phase = (phase + 1) % NUM_PHASES;
     if (++stripe >= NUM_STRIPES) {
       for(int s = 0; s < NUM_STRIPES; ++s) multicore_fifo_pop_blocking();
       ccube_demo_update();
