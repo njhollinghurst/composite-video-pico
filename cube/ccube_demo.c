@@ -197,10 +197,12 @@ static void make_visible_triangles()
   axes[1] = 4 * ((R[1][2] < 0) ? -R[1][2] : R[1][2]) + 1;
   axes[2] = 4 * ((R[2][2] < 0) ? -R[2][2] : R[2][2]) + 2;
   SORT3(axes[0], axes[1], axes[2]);
+  int m = (440 - ccube_explode) >> 5;
   for(int i2 = 0; i2 < 6; ++i2) {
     for(int i1 = 0; i1 < 6; ++i1) {
       for(int i0 = 0; i0 < 6; ++i0) {
-        if (56 * (i0 + i1 + i2) > 512 - ccube_explode) {
+        if (i2 >= m || i1 >= m || i0 >= m) {
+          int bmap;
           int rgb[4];
           rgb[axes[0] & 3] = i0;
           rgb[axes[1] & 3] = i1;
@@ -208,21 +210,20 @@ static void make_visible_triangles()
           if (R[0][2] > 0) rgb[0] = 5-rgb[0];
           if (R[1][2] > 0) rgb[1] = 5-rgb[1];
           if (R[2][2] > 0 ) rgb[2] = 5-rgb[2];
-          if (ccube_explode > 256 || i0 >= 5 || i1 >= 5 || i2 >= 5 || i0 == 0 || i1 == 0 || i2 == 0) {
-            int bmap = 0;
-            if (ccube_explode > 256) {
-              bmap = 63;
-            }
-            else {
-              if (rgb[0] == 0) bmap |= 1;
-              if (rgb[1] == 0) bmap |= 2;
-              if (rgb[2] == 0) bmap |= 4;
-              if (rgb[0] == 5) bmap |= 8;
-              if (rgb[1] == 5) bmap |= 16;
-              if (rgb[2] == 5) bmap |= 32;
-            }
-            make_cubie(rgb[0], rgb[1], rgb[2], bmap);
+          if (ccube_explode > 256) {
+            bmap = 63;
           }
+          else {
+            bmap = 0;
+            if (rgb[0] == 0) bmap |= 1;
+            if (rgb[1] == 0) bmap |= 2;
+            if (rgb[2] == 0) bmap |= 4;
+            if (rgb[0] == 5) bmap |= 8;
+            if (rgb[1] == 5) bmap |= 16;
+            if (rgb[2] == 5) bmap |= 32;
+            if (!bmap) continue;
+          }
+          make_cubie(rgb[0], rgb[1], rgb[2], bmap);
         }
       }
     }
@@ -232,7 +233,6 @@ static void make_visible_triangles()
 static void draw_triangle(uint8_t *buffer, int32_t v0, int32_t v1, int32_t v2,
                           uint16_t pattern[4], int stripe_height, int chroma_phase, int stride_in_bytes)
 {
-  int i;
   int32_t slope02 = (v2 >> 16) - (v0 >> 16);
   int32_t slope01 = (v1 >> 16) - (v0 >> 16);
   int32_t slope12 = (v2 >> 16) - (v1 >> 16);
@@ -240,22 +240,23 @@ static void draw_triangle(uint8_t *buffer, int32_t v0, int32_t v1, int32_t v2,
   slope01 = (slope01) ? ((v1 - v0) << 18) / slope01 : 0;
   slope12 = (slope12) ? ((v2 - v1) << 18) / slope12 : 0;
   // iterate over all the integer Y positions that are inside the triangle
-  for(i = (v0 >= 0) ? (v0 >> 20) + 1 : 0; i <= (v1 >> 20); ++i) {
+  int i = (v0 >= 0) ? (v0 >> 20) + 1 : 0;
+  int x0 = (v0 << 18) + slope02 * (int32_t)(16*i - (v0 >> 16));
+  int x1 = (v0 << 18) + slope01 * (int32_t)(16*i - (v0 >> 16));
+  slope02 <<= 4;
+  slope01 <<= 4;
+  for(; i <= (v1 >> 20); ++i) {
     if (i >= stripe_height) return;
-    int x0 = (v0 << 18) + slope02 * (int32_t)(16*i - (v0 >> 16));
-    int x1 = (v0 << 18) + slope01 * (int32_t)(16*i - (v0 >> 16));
-    if (x1 < x0) { int32_t t = x0; x0 = x1; x1 = t; }
-    x0 >>= 21;
-    x1 >>= 21;
-    hfill_nybble_pattern(buffer + i * stride_in_bytes, pattern[(i + chroma_phase)&3], x0, x1);
+    hfill_nybble_pattern(buffer + i * stride_in_bytes, pattern[(i + chroma_phase)&3], x0 >> 21, x1 >> 21);
+    x0 += slope02;
+    x1 += slope01;
   }
+  x1 = (v1 << 18) + slope12 * (int32_t)(16*i - (v1 >> 16));
+  slope12 <<= 4;
   for(; i <= (v2 >> 20) && i < stripe_height; ++i) {
-    int x0 = (v0 << 18) + slope02 * (int32_t)(16*i - (v0 >> 16));
-    int x1 = (v1 << 18) + slope12 * (int32_t)(16*i - (v1 >> 16));
-    if (x1 < x0) { int32_t t = x0; x0 = x1; x1 = t; }
-    x0 >>= 21;
-    x1 >>= 21;
-    hfill_nybble_pattern(buffer + i * stride_in_bytes, pattern[(i + chroma_phase)&3], x0, x1);
+    hfill_nybble_pattern(buffer + i * stride_in_bytes, pattern[(i + chroma_phase)&3], x0 >> 21, x1 >> 21);
+    x0 += slope02;
+    x1 += slope12;
   }
 }
 
@@ -344,8 +345,10 @@ void ccube_demo_update()
     ccube_explode = 256;
   else if (ccube_explode_timer < 2032)
     ccube_explode = (512 + 15*ccube_explode) >> 4;
-  else
-    ccube_explode -= 12;
+  else {
+    ccube_explode -= 16;
+    if (ccube_explode < 272) ccube_explode = 256;
+  }
 
   for(i = 0; i < 3; i++) {
     for(j = 0; j < 3; j++) {

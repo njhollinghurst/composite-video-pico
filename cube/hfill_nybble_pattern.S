@@ -7,11 +7,18 @@ pico_default_asm_setup
 	// void hfill_nybble_pattern(ptr, pattern, x0, x1);
 	// ptr is assumed to be 4-byte aligned
 	// pattern is a single 16-bit fill pattern
-	// x0, x1 are start and end positions in *nybbles*
+	// x0, x1 are start and end positions in *nybbles* in either order
 
 .section .time_critical_hfill_nybble_pattern
 regular_func hfill_nybble_pattern
 	push {r4,r5}
+	cmp  r2, r3
+	blt  8f
+	beq  9f
+	mov  r4, r2
+	mov  r2, r3
+	mov  r3, r4
+8:
 	lsls r4, r1, #16
 	lsrs r5, r3, #3
 	orrs r1, r4      // r1 = pattern (32-bit)
